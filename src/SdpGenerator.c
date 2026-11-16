@@ -319,6 +319,13 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
     snprintf(payloadStr, sizeof(payloadStr), "%d", StreamConfig.fps);
     err |= addAttributeString(&optionHead, "x-nv-video[0].maxFPS", payloadStr);
 
+    // PyroWave can't split a coded block between packets, and a block can be larger than a
+    // regular MTU-sized packet at high bitrates (1592 bytes seen). A larger datagram is IP
+    // fragmented on the LAN, which is better than dropping the block.
+    if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+        StreamConfig.packetSize = 2048;
+    }
+
     // Adjust the video packet size to account for encryption overhead
     if (EncryptionFeaturesEnabled & SS_ENC_VIDEO) {
         LC_ASSERT(StreamConfig.packetSize % 16 == 0);
