@@ -1189,7 +1189,10 @@ static void deliverPyroWaveFrame(void) {
     uint32_t expected = pwHaveFirst && pwHaveLast ? (uint32_t)U16(pwLastSequence - pwFirstSequence) + 1 : 0;
     if (expected != 0 && pwPacketCount < expected) {
         Limelog("PyroWave frame %u delivered with %u of %u packets\n", pwFrameIndex, pwPacketCount, expected);
+        streamStats.videoFramesIncomplete++;
+        streamStats.videoPacketsLost += expected - pwPacketCount;
     }
+    streamStats.videoFramesDelivered++;
 
     frameType = FRAME_TYPE_IDR;
     reassembleFrame((int)pwFrameIndex);
@@ -1225,6 +1228,9 @@ bool queuePyroWavePacket(PRTPV_QUEUE_ENTRY queueEntryPtr) {
     if (!pwFrameActive) {
         if (pwFrameIndex != 0 && frameIndex != pwFrameIndex + 1) {
             Limelog("Network dropped %u PyroWave frame(s) entirely\n", frameIndex - pwFrameIndex - 1);
+            streamStats.videoFramesLost += frameIndex - pwFrameIndex - 1;
+            // At least one packet per frame is gone
+            streamStats.videoPacketsLost += frameIndex - pwFrameIndex - 1;
         }
 
         pwFrameActive = true;
@@ -1235,6 +1241,13 @@ bool queuePyroWavePacket(PRTPV_QUEUE_ENTRY queueEntryPtr) {
         firstPacketReceiveTime = queueEntry.receiveTimeMs;
         firstPacketPresentationTime = queueEntry.presentationTimeMs;
         frameHostProcessingLatency = 0;
+    }
+
+    // Helios puts the host processing latency (0.1 ms units, little endian) in the 4 bytes after the RTP
+    // header, in every packet of the frame. Older hosts leave them zero.
+    if (frameHostProcessingLatency == 0 && (queueEntry.packet->header & FLAG_EXTENSION)) {
+        const uint8_t* latencyBytes = ((const uint8_t*)queueEntry.packet) + sizeof(*queueEntry.packet);
+        frameHostProcessingLatency = (uint16_t)(latencyBytes[0] | (latencyBytes[1] << 8));
     }
 
     // Find the place of this packet in the sequence. Duplicates are dropped.

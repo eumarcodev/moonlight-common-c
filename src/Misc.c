@@ -2,6 +2,14 @@
 
 #define ENET_INTERNAL_TIMEOUT_MS 100
 
+// Written by the receive threads without locking: each field has a single writer and the overlay
+// only needs approximate, monotonically growing numbers.
+STREAM_STATS streamStats;
+
+void LiGetStreamStats(PSTREAM_STATS stats) {
+    *stats = streamStats;
+}
+
 // This function wraps enet_host_service() and hides the fact that it must be called
 // multiple times for retransmissions to work correctly. It is meant to be a drop-in
 // replacement for enet_host_service(). It also handles cancellation of the connection

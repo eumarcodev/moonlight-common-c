@@ -159,6 +159,9 @@ static void VideoReceiveThreadProc(void* context) {
             continue;
         }
 
+        streamStats.videoPacketsReceived++;
+        streamStats.videoBytesReceived += (uint32_t)err;
+
         if (!receivedDataFromPeer) {
             receivedDataFromPeer = true;
             Limelog("Received first video packet after %d ms\n", waitingForVideoMs);

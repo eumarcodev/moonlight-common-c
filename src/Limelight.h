@@ -571,6 +571,25 @@ const char* LiGetStageName(int stage);
 // This function may only be called between LiStartConnection() and LiStopConnection().
 bool LiGetEstimatedRttInfo(uint32_t* estimatedRtt, uint32_t* estimatedRttVariance);
 
+// Running counters for the performance overlay (Helios/Selene extension). All values only grow
+// during a connection and wrap at 2^32, so callers should compute differences with unsigned math.
+// They are reset by LiStartConnection(). Video counters cover every codec; the frame counters
+// are only fed by the PyroWave depacketizer.
+typedef struct _STREAM_STATS {
+    uint32_t videoPacketsReceived;   // RTP video datagrams received (data and FEC)
+    uint32_t videoBytesReceived;     // Bytes of those datagrams
+    uint32_t videoFramesDelivered;   // Frames handed to the decoder (complete or not)
+    uint32_t videoFramesIncomplete;  // Frames delivered with packets missing
+    uint32_t videoFramesLost;        // Frames that never arrived at all
+    uint32_t videoPacketsLost;       // Estimated packets missing from incomplete or lost frames
+    uint32_t audioPacketsReceived;   // Audio packets handed to the decoder after FEC
+    uint32_t audioPacketsLost;       // Audio packets still missing after FEC (gaps in the sequence)
+    uint32_t audioPacketsRecovered;  // Audio packets rebuilt from FEC
+    uint32_t audioBlocksUnrecoverable; // Audio FEC blocks given up on
+} STREAM_STATS, *PSTREAM_STATS;
+
+void LiGetStreamStats(PSTREAM_STATS stats);
+
 // This function sends a request to the server to execute the requested cmd id.
 int LiSendExecServerCmd(uint8_t cmdId);
 
