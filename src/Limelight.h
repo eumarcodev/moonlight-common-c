@@ -590,6 +590,13 @@ typedef struct _STREAM_STATS {
 
 void LiGetStreamStats(PSTREAM_STATS stats);
 
+// Helios/Selene extension: preferences sent to a Helios host when the stream is PyroWave. Call before
+// LiStartConnection(). The host clamps them to its own limits and older hosts ignore them.
+//  packetSize: largest PyroWave packet in bytes (400 to 2000), 0 lets the host decide
+//  maxFrameKb: cap on the size of one frame in KB (1 to 4096), 0 means no cap
+// Values out of range are treated as 0. They stay set until this is called again.
+void LiSetPyroWavePrefs(int packetSize, int maxFrameKb);
+
 // This function sends a request to the server to execute the requested cmd id.
 int LiSendExecServerCmd(uint8_t cmdId);
 

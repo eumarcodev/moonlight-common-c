@@ -1,5 +1,14 @@
 #include "Limelight-internal.h"
 
+// PyroWave preferences, see LiSetPyroWavePrefs()
+static int PyroWavePacketSizePref;
+static int PyroWaveMaxFrameKbPref;
+
+void LiSetPyroWavePrefs(int packetSize, int maxFrameKb) {
+    PyroWavePacketSizePref = (packetSize >= 400 && packetSize <= 2000) ? packetSize : 0;
+    PyroWaveMaxFrameKbPref = (maxFrameKb >= 1 && maxFrameKb <= 4096) ? maxFrameKb : 0;
+}
+
 #define MAX_OPTION_NAME_LEN 128
 
 #define MAX_SDP_HEADER_LEN 128
@@ -308,6 +317,18 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
         }
         else {
             err |= addAttributeString(&optionHead, "x-ss-video[0].chromaSamplingType", "0");
+        }
+
+        // PyroWave preferences (Helios extension). Only sent when set; other hosts ignore unknown attributes.
+        if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+            if (PyroWavePacketSizePref > 0) {
+                snprintf(payloadStr, sizeof(payloadStr), "%d", PyroWavePacketSizePref);
+                err |= addAttributeString(&optionHead, "x-ss-pyrowave.packetSize", payloadStr);
+            }
+            if (PyroWaveMaxFrameKbPref > 0) {
+                snprintf(payloadStr, sizeof(payloadStr), "%d", PyroWaveMaxFrameKbPref);
+                err |= addAttributeString(&optionHead, "x-ss-pyrowave.maxFrameKb", payloadStr);
+            }
         }
     }
 
