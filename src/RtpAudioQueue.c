@@ -444,6 +444,7 @@ static bool completeFecBlock(PRTP_AUDIO_QUEUE queue, PRTPA_FEC_BLOCK block) {
     // We will need to recover the RTP packet using the FEC header
     for (int i = 0; i < RTPA_DATA_SHARDS; i++) {
         if (block->marks[i]) {
+            streamStats.audioPacketsRecovered++;
             block->dataPackets[i]->header = 0x80; // RTPv2
             block->dataPackets[i]->packetType = block->fecHeader.payloadType;
             block->dataPackets[i]->sequenceNumber = block->fecHeader.baseSequenceNumber + i;
@@ -534,6 +535,7 @@ static void handleMissingPackets(PRTP_AUDIO_QUEUE queue) {
     if (!queue->receivedOosData || PltGetMillis() - queue->blockHead->queueTimeMs > (uint32_t)(AudioPacketDuration * RTPA_DATA_SHARDS) + RTPQ_OOS_WAIT_TIME_MS) {
         LC_ASSERT(!isBefore16(queue->nextRtpSequenceNumber, queue->blockHead->fecHeader.baseSequenceNumber));
 
+        streamStats.audioBlocksUnrecoverable++;
         Limelog("Unable to recover audio data block %u to %u (%u+%u=%u received < %u needed)\n",
                 queue->blockHead->fecHeader.baseSequenceNumber,
                 queue->blockHead->fecHeader.baseSequenceNumber + RTPA_DATA_SHARDS - 1,

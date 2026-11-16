@@ -171,7 +171,9 @@ static void decodeInputData(PQUEUED_AUDIO_PACKET packet) {
     PRTP_PACKET rtp = (PRTP_PACKET)&packet->data[0];
     if (lastSeq != 0 && (unsigned short)(lastSeq + 1) != rtp->sequenceNumber) {
         Limelog("Network dropped audio data (expected %d, but received %d)\n", lastSeq + 1, rtp->sequenceNumber);
+        streamStats.audioPacketsLost += (uint16_t)(rtp->sequenceNumber - (uint16_t)(lastSeq + 1));
     }
+    streamStats.audioPacketsReceived++;
 
     lastSeq = rtp->sequenceNumber;
 
