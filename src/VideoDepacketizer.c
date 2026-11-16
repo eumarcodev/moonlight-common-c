@@ -31,6 +31,10 @@ static unsigned int consecutiveFrameDrops;
 
 static LINKED_BLOCKING_QUEUE decodeUnitQueue;
 
+// PyroWave frame assembly state (see queuePyroWavePacket)
+static bool pwFrameActive;
+static uint32_t pwFrameIndex;
+
 typedef struct _BUFFER_DESC {
     char* data;
     unsigned int offset;
@@ -40,6 +44,7 @@ typedef struct _BUFFER_DESC {
 typedef struct _LENTRY_INTERNAL {
     LENTRY entry;
     void* allocPtr;
+    uint16_t rtpSequenceNumber; // Only used for PyroWave frame assembly
 } LENTRY_INTERNAL, *PLENTRY_INTERNAL;
 
 #define H264_NAL_TYPE(x) ((x) & 0x1F)
@@ -76,6 +81,8 @@ void initializeVideoDepacketizer(int pktSize) {
     dropStatePending = false;
     idrFrameProcessed = false;
     strictIdrFrameWait = !isReferenceFrameInvalidationEnabled();
+    pwFrameActive = false;
+    pwFrameIndex = 0;
 }
 
 // Free the NAL chain
@@ -1146,6 +1153,134 @@ void notifyFrameLost(unsigned int frameNumber, bool speculative) {
         // Notify the host that we lost this one
         connectionDetectedFrameLoss(startFrameNumber, frameNumber);
     }
+}
+
+// PyroWave frame assembly.
+//
+// Every PyroWave frame is independent and a lost packet only degrades the blocks it carried, so unlike the
+// H.264/HEVC/AV1 path there is no FEC recovery, no waiting for an IDR frame and no reference invalidation.
+// The payload of each RTP packet is a whole number of PyroWave packets (exactly sized, never padded), so a
+// frame is the concatenation of the payloads that arrived, in RTP sequence order. The decoder is told which
+// parts are missing by simply not receiving them.
+//
+// A frame is delivered as soon as every packet between its first (SOF) and last (EOF) one has arrived, or,
+// if some are missing, when the first packet of a later frame shows up.
+static uint16_t pwFirstSequence;
+static uint16_t pwLastSequence;
+static bool pwHaveFirst;
+static bool pwHaveLast;
+static uint32_t pwPacketCount;
+
+static void deliverPyroWaveFrame(void) {
+    if (!pwFrameActive) {
+        return;
+    }
+
+    pwFrameActive = false;
+
+    if (nalChainHead == NULL) {
+        return;
+    }
+
+    uint32_t expected = pwHaveFirst && pwHaveLast ? (uint32_t)U16(pwLastSequence - pwFirstSequence) + 1 : 0;
+    if (expected != 0 && pwPacketCount < expected) {
+        Limelog("PyroWave frame %u delivered with %u of %u packets\n", pwFrameIndex, pwPacketCount, expected);
+    }
+
+    frameType = FRAME_TYPE_IDR;
+    reassembleFrame((int)pwFrameIndex);
+}
+
+bool queuePyroWavePacket(PRTPV_QUEUE_ENTRY queueEntryPtr) {
+    RTPV_QUEUE_ENTRY queueEntry = *queueEntryPtr;
+
+    int dataOffset = sizeof(*queueEntry.packet);
+    if (queueEntry.packet->header & FLAG_EXTENSION) {
+        dataOffset += 4; // 2 additional fields
+    }
+
+    if (queueEntry.length < dataOffset + (int)sizeof(NV_VIDEO_PACKET) + 1) {
+        return false;
+    }
+
+    PNV_VIDEO_PACKET videoPacket = (PNV_VIDEO_PACKET)(((char*)queueEntry.packet) + dataOffset);
+    uint32_t frameIndex = videoPacket->frameIndex;
+    uint8_t flags = videoPacket->flags;
+    uint16_t sequence = queueEntry.packet->sequenceNumber;
+
+    // Packets of a frame that was already delivered are too late to be used
+    if (isBefore32(frameIndex, pwFrameIndex) || (!pwFrameActive && frameIndex == pwFrameIndex && pwFrameIndex != 0)) {
+        return false;
+    }
+
+    if (pwFrameActive && frameIndex != pwFrameIndex) {
+        // The next frame started before this one completed: deliver what we have
+        deliverPyroWaveFrame();
+    }
+
+    if (!pwFrameActive) {
+        if (pwFrameIndex != 0 && frameIndex != pwFrameIndex + 1) {
+            Limelog("Network dropped %u PyroWave frame(s) entirely\n", frameIndex - pwFrameIndex - 1);
+        }
+
+        pwFrameActive = true;
+        pwFrameIndex = frameIndex;
+        pwHaveFirst = false;
+        pwHaveLast = false;
+        pwPacketCount = 0;
+        firstPacketReceiveTime = queueEntry.receiveTimeMs;
+        firstPacketPresentationTime = queueEntry.presentationTimeMs;
+        frameHostProcessingLatency = 0;
+    }
+
+    // Find the place of this packet in the sequence. Duplicates are dropped.
+    PLENTRY_INTERNAL prev = NULL;
+    PLENTRY_INTERNAL cur = (PLENTRY_INTERNAL)nalChainHead;
+    while (cur != NULL && isBefore16(cur->rtpSequenceNumber, sequence)) {
+        prev = cur;
+        cur = (PLENTRY_INTERNAL)cur->entry.next;
+    }
+    if (cur != NULL && cur->rtpSequenceNumber == sequence) {
+        return false;
+    }
+
+    // Reuse the memory reserved for the queue entry to hold the LENTRY_INTERNAL, as the H.264 path does
+    LC_ASSERT(sizeof(LENTRY_INTERNAL) <= sizeof(RTPV_QUEUE_ENTRY));
+    PLENTRY_INTERNAL entry = (PLENTRY_INTERNAL)queueEntryPtr;
+    entry->allocPtr = queueEntry.packet;
+    entry->rtpSequenceNumber = sequence;
+    entry->entry.data = (char*)(videoPacket + 1);
+    entry->entry.length = queueEntry.length - dataOffset - (int)sizeof(NV_VIDEO_PACKET);
+    entry->entry.bufferType = BUFFER_TYPE_PICDATA;
+    entry->entry.next = (PLENTRY)cur;
+
+    if (prev == NULL) {
+        nalChainHead = (PLENTRY)entry;
+    }
+    else {
+        prev->entry.next = (PLENTRY)entry;
+    }
+    if (cur == NULL) {
+        nalChainTail = (PLENTRY)entry;
+    }
+    nalChainDataLength += entry->entry.length;
+    pwPacketCount++;
+
+    if ((flags & FLAG_SOF) && !pwHaveFirst) {
+        pwHaveFirst = true;
+        pwFirstSequence = sequence;
+    }
+    if ((flags & FLAG_EOF) && !pwHaveLast) {
+        pwHaveLast = true;
+        pwLastSequence = sequence;
+    }
+
+    // Complete frame: deliver right away
+    if (pwHaveFirst && pwHaveLast && pwPacketCount == (uint32_t)U16(pwLastSequence - pwFirstSequence) + 1) {
+        deliverPyroWaveFrame();
+    }
+
+    return true;
 }
 
 // Add an RTP Packet to the queue
