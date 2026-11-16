@@ -12,6 +12,7 @@ STREAM_CONFIGURATION StreamConfig;
 CONNECTION_LISTENER_CALLBACKS ListenerCallbacks;
 DECODER_RENDERER_CALLBACKS VideoCallbacks;
 int NegotiatedVideoFormat;
+STREAM_STATS streamStats;
 void cleanupPlatformSockets(void) {}
 int initializePlatformSockets(void) { return 0; }
 int enet_initialize(void) { return 0; }
