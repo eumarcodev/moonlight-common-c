@@ -540,6 +540,32 @@ uint32_t RtpvGetCurrentFrameNumber(PRTP_VIDEO_QUEUE queue) {
 }
 
 int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_QUEUE_ENTRY packetEntry) {
+    if (NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) {
+        // PyroWave has no FEC and tolerates loss, so packets skip the FEC queue and go straight to
+        // the depacketizer, which assembles (possibly partial) frames.
+        int offset = sizeof(*packet);
+        if (packet->header & FLAG_EXTENSION) {
+            offset += 4;
+        }
+        if (length < offset + (int)sizeof(NV_VIDEO_PACKET)) {
+            return RTPF_RET_REJECTED;
+        }
+
+        PNV_VIDEO_PACKET pwPacket = (PNV_VIDEO_PACKET)(((char*)packet) + offset);
+        pwPacket->streamPacketIndex = LE32(pwPacket->streamPacketIndex);
+        pwPacket->frameIndex = LE32(pwPacket->frameIndex);
+
+        packetEntry->packet = packet;
+        packetEntry->length = length;
+        packetEntry->isParity = false;
+        packetEntry->prev = NULL;
+        packetEntry->next = NULL;
+        packetEntry->receiveTimeMs = LiGetMillis();
+        packetEntry->presentationTimeMs = packet->timestamp / PTS_DIVISOR;
+
+        return queuePyroWavePacket(packetEntry) ? RTPF_RET_QUEUED : RTPF_RET_REJECTED;
+    }
+
     if (isBefore16(packet->sequenceNumber, queue->nextContiguousSequenceNumber)) {
         // Reject packets behind our current buffer window
         return RTPF_RET_REJECTED;
