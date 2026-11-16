@@ -1073,7 +1073,25 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
             goto Exit;
         }
         
-        if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_AV1) && strstr(response.payload, "AV1/90000")) {
+        NegotiatedVideoFormat = 0;
+
+        // PyroWave is only used when the client asks for it, the host advertises it in /serverinfo
+        // and in the SDP, and both sides speak the same protocol version.
+        if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_PYROWAVE) &&
+                (serverInfo->serverCodecModeSupport & SCM_MASK_PYROWAVE) &&
+                strstr(response.payload, "PYROWAVE/90000") && strstr(response.payload, "version=1")) {
+            if ((serverInfo->serverCodecModeSupport & SCM_PYROWAVE_444) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE_444)) {
+                NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE_444;
+            }
+            else if ((serverInfo->serverCodecModeSupport & SCM_PYROWAVE) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_PYROWAVE)) {
+                NegotiatedVideoFormat = VIDEO_FORMAT_PYROWAVE;
+            }
+        }
+
+        if (NegotiatedVideoFormat != 0) {
+            // Already negotiated PyroWave above
+        }
+        else if ((StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_AV1) && strstr(response.payload, "AV1/90000")) {
             if ((serverInfo->serverCodecModeSupport & SCM_AV1_HIGH10_444) && (StreamConfig.supportedVideoFormats & VIDEO_FORMAT_AV1_HIGH10_444)) {
                 NegotiatedVideoFormat = VIDEO_FORMAT_AV1_HIGH10_444;
             }
