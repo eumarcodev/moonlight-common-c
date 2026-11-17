@@ -601,6 +601,13 @@ void LiGetStreamStats(PSTREAM_STATS stats);
 // Values out of range are treated as 0. They stay set until this is called again.
 void LiSetPyroWavePrefs(int packetSize, int maxFrameKb);
 
+// Helios/Selene extension: picture quality preferences for PyroWave streams. Call before LiStartConnection().
+//  bitrateKbps: video bitrate used instead of StreamConfig.bitrate when the stream is PyroWave (PyroWave codes
+//               every frame on its own and needs a higher bitrate than HEVC for the same quality), 0 keeps it
+//  staticBoost: bigger budget for the frames the host repeats while the screen is still: 0 host setting, 1 on, 2 off
+// Values out of range are treated as 0. They stay set until this is called again.
+void LiSetPyroWaveQualityPrefs(int bitrateKbps, int staticBoost);
+
 // This function sends a request to the server to execute the requested cmd id.
 int LiSendExecServerCmd(uint8_t cmdId);
 
