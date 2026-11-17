@@ -8,6 +8,9 @@ STREAM_STATS streamStats;
 
 void LiGetStreamStats(PSTREAM_STATS stats) {
     *stats = streamStats;
+
+    // A maximum over the window since the previous call, not a growing counter
+    streamStats.audioStallMaxMs = 0;
 }
 
 // This function wraps enet_host_service() and hides the fact that it must be called

@@ -586,8 +586,12 @@ typedef struct _STREAM_STATS {
     uint32_t audioPacketsLost;       // Audio packets still missing after FEC (gaps in the sequence)
     uint32_t audioPacketsRecovered;  // Audio packets rebuilt from FEC
     uint32_t audioBlocksUnrecoverable; // Audio FEC blocks given up on
+    uint32_t audioPacketsDiscarded;  // Audio packets dropped by the client because they arrived too late
+    uint32_t audioStalls;            // Times audio stopped arriving and then came in a burst
+    uint32_t audioStallMaxMs;        // Longest such stall since the previous LiGetStreamStats() call (reset by it)
 } STREAM_STATS, *PSTREAM_STATS;
 
+// Copies the counters. audioStallMaxMs is a maximum over the window since the previous call and is reset.
 void LiGetStreamStats(PSTREAM_STATS stats);
 
 // Helios/Selene extension: preferences sent to a Helios host when the stream is PyroWave. Call before
