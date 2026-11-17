@@ -18,6 +18,21 @@ static bool pingThreadStarted;
 static bool receivedDataFromPeer;
 static uint64_t firstReceiveTime;
 
+// Helios/Selene: data packets dropped from the queue because they were late. The receive thread adds
+// and the decoder thread subtracts them from the next sequence gap, so they are not counted as network loss.
+static int discardedSeqPending;
+
+// Helios/Selene: arrival stall detection. A gap longer than AUDIO_STALL_MIN_GAP_MS only counts as a stall
+// when it ends with a burst (AUDIO_STALL_BURST_PACKETS within AUDIO_STALL_BURST_MS), so the silence
+// between sounds (the host sends nothing) is not reported.
+#define AUDIO_STALL_MIN_GAP_MS 30
+#define AUDIO_STALL_BURST_MS 3
+#define AUDIO_STALL_BURST_PACKETS 4
+static uint64_t lastArrivalMs;
+static uint64_t gapEndMs;
+static uint32_t gapLengthMs;
+static int gapBurstPackets;
+
 #ifdef LC_DEBUG
 #define INVALID_OPUS_HEADER 0x00
 static uint8_t opusHeaderByte;
@@ -69,6 +84,11 @@ int initializeAudioStream(void) {
     LbqInitializeLinkedBlockingQueue(&packetQueue, 30);
     RtpaInitializeQueue(&rtpAudioQueue);
     lastSeq = 0;
+    discardedSeqPending = 0;
+    lastArrivalMs = 0;
+    gapEndMs = 0;
+    gapLengthMs = 0;
+    gapBurstPackets = 0;
     receivedDataFromPeer = false;
     pingThreadStarted = false;
     firstReceiveTime = 0;
@@ -149,10 +169,19 @@ static bool queuePacketToLbq(PQUEUED_AUDIO_PACKET* packet) {
             *packet = NULL;
         }
         else if (err == LBQ_BOUND_EXCEEDED) {
-            Limelog("Audio packet queue overflow\n");
-
-            // The audio queue is full, so free all existing items and try again
-            freePacketList(LbqFlushQueueItems(&packetQueue));
+            // The audio queue is full. Drop only the oldest packet to make room (Selene #53): flushing
+            // the whole queue threw away 150 ms of sound after every late burst.
+            PQUEUED_AUDIO_PACKET oldest;
+            if (LbqPollQueueElement(&packetQueue, (void**)&oldest) == LBQ_SUCCESS) {
+                if (oldest->header.size != 0) {
+                    __atomic_add_fetch(&discardedSeqPending, 1, __ATOMIC_RELAXED);
+                }
+                free(oldest);
+                streamStats.audioPacketsDiscarded++;
+            }
+            else {
+                freePacketList(LbqFlushQueueItems(&packetQueue));
+            }
         }
     } while (err == LBQ_BOUND_EXCEEDED);
 
@@ -170,8 +199,22 @@ static void decodeInputData(PQUEUED_AUDIO_PACKET packet) {
 
     PRTP_PACKET rtp = (PRTP_PACKET)&packet->data[0];
     if (lastSeq != 0 && (unsigned short)(lastSeq + 1) != rtp->sequenceNumber) {
-        Limelog("Network dropped audio data (expected %d, but received %d)\n", lastSeq + 1, rtp->sequenceNumber);
-        streamStats.audioPacketsLost += (uint16_t)(rtp->sequenceNumber - (uint16_t)(lastSeq + 1));
+        int missing = (uint16_t)(rtp->sequenceNumber - (uint16_t)(lastSeq + 1));
+
+        // Packets the receive thread dropped because they were late are not network loss
+        int discarded = __atomic_load_n(&discardedSeqPending, __ATOMIC_RELAXED);
+        if (discarded > missing) {
+            discarded = missing;
+        }
+        if (discarded > 0) {
+            __atomic_sub_fetch(&discardedSeqPending, discarded, __ATOMIC_RELAXED);
+            missing -= discarded;
+        }
+
+        if (missing > 0) {
+            Limelog("Network dropped audio data (expected %d, but received %d)\n", lastSeq + 1, rtp->sequenceNumber);
+            streamStats.audioPacketsLost += missing;
+        }
     }
     streamStats.audioPacketsReceived++;
 
@@ -315,6 +358,33 @@ static void AudioReceiveThreadProc(void* context) {
                 packetsToDrop--;
             }
             continue;
+        }
+
+        {
+            // Arrival stall detection for the overlay (see AUDIO_STALL_MIN_GAP_MS)
+            uint64_t now = PltGetMillis();
+            if (gapLengthMs != 0) {
+                if (now - gapEndMs <= AUDIO_STALL_BURST_MS) {
+                    if (++gapBurstPackets >= AUDIO_STALL_BURST_PACKETS) {
+                        streamStats.audioStalls++;
+                        if (gapLengthMs > streamStats.audioStallMaxMs) {
+                            streamStats.audioStallMaxMs = gapLengthMs;
+                        }
+                        Limelog("Audio arrival stalled for %u ms, then arrived in a burst\n", gapLengthMs);
+                        gapLengthMs = 0;
+                    }
+                }
+                else {
+                    // Normal cadence after the gap: it was silence on the host, not a stall
+                    gapLengthMs = 0;
+                }
+            }
+            if (lastArrivalMs != 0 && now - lastArrivalMs > AUDIO_STALL_MIN_GAP_MS) {
+                gapLengthMs = (uint32_t)(now - lastArrivalMs);
+                gapEndMs = now;
+                gapBurstPackets = 1;
+            }
+            lastArrivalMs = now;
         }
 
         // Convert fields to host byte-order
