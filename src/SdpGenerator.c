@@ -4,9 +4,25 @@
 static int PyroWavePacketSizePref;
 static int PyroWaveMaxFrameKbPref;
 
+static int PyroWaveBitratePref;
+static int PyroWaveStaticBoostPref;
+
 void LiSetPyroWavePrefs(int packetSize, int maxFrameKb) {
     PyroWavePacketSizePref = (packetSize >= 400 && packetSize <= 2000) ? packetSize : 0;
     PyroWaveMaxFrameKbPref = (maxFrameKb >= 1 && maxFrameKb <= 4096) ? maxFrameKb : 0;
+}
+
+void LiSetPyroWaveQualityPrefs(int bitrateKbps, int staticBoost) {
+    PyroWaveBitratePref = (bitrateKbps >= 500 && bitrateKbps <= 1000000) ? bitrateKbps : 0;
+    PyroWaveStaticBoostPref = (staticBoost == 1 || staticBoost == 2) ? staticBoost : 0;
+}
+
+// The video bitrate of this stream: the PyroWave one when the stream is PyroWave and it was set
+static int videoBitrateKbps(void) {
+    if ((NegotiatedVideoFormat & VIDEO_FORMAT_MASK_PYROWAVE) && PyroWaveBitratePref > 0) {
+        return PyroWaveBitratePref;
+    }
+    return StreamConfig.bitrate;
 }
 
 #define MAX_OPTION_NAME_LEN 128
@@ -329,6 +345,10 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
                 snprintf(payloadStr, sizeof(payloadStr), "%d", PyroWaveMaxFrameKbPref);
                 err |= addAttributeString(&optionHead, "x-ss-pyrowave.maxFrameKb", payloadStr);
             }
+            if (PyroWaveStaticBoostPref > 0) {
+                snprintf(payloadStr, sizeof(payloadStr), "%d", PyroWaveStaticBoostPref);
+                err |= addAttributeString(&optionHead, "x-ss-pyrowave.staticBoost", payloadStr);
+            }
         }
     }
 
@@ -362,7 +382,7 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
     err |= addAttributeString(&optionHead, "x-nv-video[0].framesWithInvalidRefThreshold", "0");
 
     // 20% of the video bitrate will added to the user-specified bitrate for FEC
-    adjustedBitrate = (int)(StreamConfig.bitrate * 0.80);
+    adjustedBitrate = (int)(videoBitrateKbps() * 0.80);
 
     // Use more strict bitrate logic when streaming remotely. The theory here is that remote
     // streaming is much more bandwidth sensitive. Someone might select 5 Mbps because that's
@@ -395,7 +415,7 @@ static PSDP_OPTION getAttributesList(char*urlSafeAddr) {
 
         // Send the configured bitrate to Sunshine hosts, so they can adjust for dynamic FEC percentage
         if (IS_SUNSHINE()) {
-            snprintf(payloadStr, sizeof(payloadStr), "%u", StreamConfig.bitrate);
+            snprintf(payloadStr, sizeof(payloadStr), "%u", (unsigned int)videoBitrateKbps());
             err |= addAttributeString(&optionHead, "x-ml-video.configuredBitrateKbps", payloadStr);
         }
     }

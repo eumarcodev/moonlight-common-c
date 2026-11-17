@@ -101,6 +101,29 @@ int main(void) {
     CHECK(strstr(sdp, "x-ss-pyrowave") == NULL);
     free(sdp);
 
+    // Quality preferences: the PyroWave bitrate replaces the video bitrate (80% of it goes to the video,
+    // 80000 -> 64000) and the still screen boost is sent, only for PyroWave streams
+    LiSetPyroWavePrefs(0, 0);
+    LiSetPyroWaveQualityPrefs(80000, 2);
+    sdp = sdpFor(VIDEO_FORMAT_PYROWAVE);
+    CHECK(strstr(sdp, "a=x-ss-pyrowave.staticBoost:2") != NULL);
+    CHECK(strstr(sdp, "64000") != NULL);
+    CHECK(strstr(sdp, "48000") == NULL);
+    free(sdp);
+    sdp = sdpFor(VIDEO_FORMAT_H264);
+    CHECK(strstr(sdp, "x-ss-pyrowave") == NULL);
+    CHECK(strstr(sdp, "48000") != NULL);
+    CHECK(strstr(sdp, "64000") == NULL);
+    free(sdp);
+
+    // Out of range quality values are ignored
+    LiSetPyroWaveQualityPrefs(1, 7);
+    sdp = sdpFor(VIDEO_FORMAT_PYROWAVE);
+    CHECK(strstr(sdp, "x-ss-pyrowave.staticBoost") == NULL);
+    CHECK(strstr(sdp, "48000") != NULL);
+    free(sdp);
+    LiSetPyroWaveQualityPrefs(0, 0);
+
     printf(failures ? "FAILED: %d\n" : "OK\n", failures);
     return failures ? 1 : 0;
 }
