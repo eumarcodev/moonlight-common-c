@@ -1167,13 +1167,16 @@ void notifyFrameLost(unsigned int frameNumber, bool speculative) {
 // frame is the concatenation of the payloads that arrived, in RTP sequence order. The decoder is told which
 // parts are missing by simply not receiving them.
 //
-// A frame is delivered as soon as every packet between its first (SOF) and last (EOF) one has arrived, or,
-// if some are missing, when the first packet of a later frame shows up.
+// A frame is delivered as soon as its last (EOF) packet has arrived, after its first (SOF) one: the host sends
+// the packets of a frame in order, so a packet still missing at that point was lost, and waiting for it would
+// only hold the frame back until the next one starts (a whole frame period). If the first or the last packet
+// itself is lost, the frame is delivered when the first packet of a later frame shows up.
 static uint16_t pwFirstSequence;
 static uint16_t pwLastSequence;
 static bool pwHaveFirst;
 static bool pwHaveLast;
 static uint32_t pwPacketCount;
+static uint32_t pwLateFrameIndex; // last frame a late packet was reported for, to log once per frame
 
 static void deliverPyroWaveFrame(void) {
     if (!pwFrameActive) {
@@ -1217,6 +1220,10 @@ bool queuePyroWavePacket(PRTPV_QUEUE_ENTRY queueEntryPtr) {
 
     // Packets of a frame that was already delivered are too late to be used
     if (isBefore32(frameIndex, pwFrameIndex) || (!pwFrameActive && frameIndex == pwFrameIndex && pwFrameIndex != 0)) {
+        if (frameIndex != pwLateFrameIndex) {
+            pwLateFrameIndex = frameIndex;
+            Limelog("PyroWave packet of frame %u arrived after the frame was delivered\n", frameIndex);
+        }
         return false;
     }
 
@@ -1292,8 +1299,8 @@ bool queuePyroWavePacket(PRTPV_QUEUE_ENTRY queueEntryPtr) {
         pwLastSequence = sequence;
     }
 
-    // Complete frame: deliver right away
-    if (pwHaveFirst && pwHaveLast && pwPacketCount == (uint32_t)U16(pwLastSequence - pwFirstSequence) + 1) {
+    // Last packet in (complete or not): deliver right away
+    if (pwHaveFirst && pwHaveLast) {
         deliverPyroWaveFrame();
     }
 
