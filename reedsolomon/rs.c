@@ -93,11 +93,90 @@ static inline gf modnn(int x) {
     return x;
 }
 
+/*
+ * Vectorized multiplication by a constant c (split-nibble tables): since
+ * multiplication distributes over XOR, c*s = c*(s & 0x0f) ^ c*(s & 0xf0),
+ * and each half is a lookup in a 16-entry table, which maps to one table
+ * lookup instruction per 16 bytes (TBL on AArch64, VTBL on ARMv7 NEON,
+ * PSHUFB on SSSE3). The results are identical to the scalar table lookup.
+ */
+#if defined(__aarch64__) || defined(_M_ARM64)
+#include <arm_neon.h>
+#define RS_SIMD_NEON64
+#elif defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#define RS_SIMD_NEON32
+#elif defined(__SSSE3__) || defined(__AVX__)
+#include <tmmintrin.h>
+#define RS_SIMD_SSSE3
+#endif
+
+#if defined(RS_SIMD_NEON64) || defined(RS_SIMD_NEON32) || defined(RS_SIMD_SSSE3)
+#define RS_SIMD
+static void gf_nibble_tables(gf c, gf lo[16], gf hi[16]) {
+    const gf* row = &gf_mul_table[c << 8];
+    for (int i = 0; i < 16; i++) {
+        lo[i] = row[i];
+        hi[i] = row[i << 4];
+    }
+}
+#endif
+
+/*
+ * Processes the largest multiple of 16 bytes of src and returns how many
+ * bytes were done. If accumulate is set, dst ^= c*src, otherwise dst = c*src.
+ */
+static int mul_simd(gf *dst, const gf *src, gf c, int sz, int accumulate) {
+#ifdef RS_SIMD
+    gf lo[16], hi[16];
+    int i = 0;
+
+    if (sz < 16)
+        return 0;
+
+    gf_nibble_tables(c, lo, hi);
+
+#if defined(RS_SIMD_NEON64)
+    uint8x16_t tlo = vld1q_u8(lo), thi = vld1q_u8(hi), mask = vdupq_n_u8(0x0f);
+    for (; i + 16 <= sz; i += 16) {
+        uint8x16_t s = vld1q_u8(src + i);
+        uint8x16_t p = veorq_u8(vqtbl1q_u8(tlo, vandq_u8(s, mask)), vqtbl1q_u8(thi, vshrq_n_u8(s, 4)));
+        vst1q_u8(dst + i, accumulate ? veorq_u8(vld1q_u8(dst + i), p) : p);
+    }
+#elif defined(RS_SIMD_NEON32)
+    uint8x8x2_t tlo = { { vld1_u8(lo), vld1_u8(lo + 8) } };
+    uint8x8x2_t thi = { { vld1_u8(hi), vld1_u8(hi + 8) } };
+    uint8x8_t mask = vdup_n_u8(0x0f);
+    for (; i + 8 <= sz; i += 8) {
+        uint8x8_t s = vld1_u8(src + i);
+        uint8x8_t p = veor_u8(vtbl2_u8(tlo, vand_u8(s, mask)), vtbl2_u8(thi, vshr_n_u8(s, 4)));
+        vst1_u8(dst + i, accumulate ? veor_u8(vld1_u8(dst + i), p) : p);
+    }
+#else
+    __m128i tlo = _mm_loadu_si128((const __m128i*)lo), thi = _mm_loadu_si128((const __m128i*)hi);
+    __m128i mask = _mm_set1_epi8(0x0f);
+    for (; i + 16 <= sz; i += 16) {
+        __m128i s = _mm_loadu_si128((const __m128i*)(src + i));
+        __m128i p = _mm_xor_si128(_mm_shuffle_epi8(tlo, _mm_and_si128(s, mask)),
+                                  _mm_shuffle_epi8(thi, _mm_and_si128(_mm_srli_epi64(s, 4), mask)));
+        if (accumulate)
+            p = _mm_xor_si128(_mm_loadu_si128((const __m128i*)(dst + i)), p);
+        _mm_storeu_si128((__m128i*)(dst + i), p);
+    }
+#endif
+    return i;
+#else
+    (void)dst; (void)src; (void)c; (void)sz; (void)accumulate;
+    return 0;
+#endif
+}
+
 static void addmul(gf *dst1, gf *src1, gf c, int sz) {
     USE_GF_MULC;
     if (c != 0) {
-        register gf *dst = dst1, *src = src1;
-        gf *lim = &dst[sz];
+        int done = mul_simd(dst1, src1, c, sz, 1);
+        register gf *dst = dst1 + done, *src = src1 + done;
+        gf *lim = &dst1[sz];
 
         GF_MULC0(c);
         for (; dst < lim; dst++, src++)
@@ -108,37 +187,14 @@ static void addmul(gf *dst1, gf *src1, gf c, int sz) {
 static void mul(gf *dst1, gf *src1, gf c, int sz) {
     USE_GF_MULC;
     if (c != 0) {
-        register gf *dst = dst1, *src = src1;
-        gf *lim = &dst[sz];
+        int done = mul_simd(dst1, src1, c, sz, 0);
+        register gf *dst = dst1 + done, *src = src1 + done;
+        gf *lim = &dst1[sz];
         GF_MULC0(c);
         for (; dst < lim; dst++, src++)
             GF_MULC(*dst , *src);
     } else
-        memset(dst1, 0, c);
-}
-
-/* y = a.dot(b) */
-static gf* multiply1(gf *a, int ar, int ac, gf *b, int br, int bc) {
-    gf *new_m, tg;
-    int r, c, i, ptr = 0;
-
-    assert(ac == br);
-    new_m = (gf*) calloc(1, ar*bc);
-    if (NULL != new_m) {
-
-        /* this multiply is slow */
-        for (r = 0; r < ar; r++) {
-            for (c = 0; c < bc; c++) {
-                tg = 0;
-                for (i = 0; i < ac; i++)
-                    tg ^= gf_mul(a[r*ac+i], b[i*bc+c]);
-
-                new_m[ptr++] = tg;
-            }
-        }
-    }
-
-    return new_m;
+        memset(dst1, 0, sz);
 }
 
 static void init_mul_table(void) {
@@ -383,8 +439,6 @@ void reed_solomon_init(void) {
 }
 
 reed_solomon* reed_solomon_new(int data_shards, int parity_shards) {
-    gf* vm = NULL;
-    gf* top = NULL;
     int err = 0;
     reed_solomon* rs = NULL;
 
@@ -404,33 +458,21 @@ reed_solomon* reed_solomon_new(int data_shards, int parity_shards) {
             break;
         }
 
-        vm = (gf*)malloc(data_shards * rs->shards);
-
-        if (NULL == vm) {
+        /*
+         * The encode matrix is the identity on top of the Cauchy parity rows.
+         * It used to be computed as [I; 0] * inverse(I) with a schoolbook
+         * matrix product, which costs (k+p)*k^2 multiplications and always
+         * yields [I; 0]. Build it directly instead: this runs for every FEC
+         * recovery on the video receive thread.
+         */
+        rs->m = (gf*)calloc(1, data_shards * rs->shards);
+        if (NULL == rs->m) {
             err = 2;
             break;
         }
-        
-        int ptr = 0;
-        for (int row = 0; row < rs->shards; row++) {
-            for (int col = 0; col < data_shards; col++)
-                vm[ptr++] = row == col ? 1 : 0;
-        }
 
-        top = sub_matrix(vm, 0, 0, data_shards, data_shards, rs->shards, data_shards);
-        if (NULL == top) {
-            err = 3;
-            break;
-        }
-
-        err = invert_mat(top, data_shards);
-        assert(0 == err);
-
-        rs->m = multiply1(vm, rs->shards, data_shards, top, data_shards, data_shards);
-        if (NULL == rs->m) {
-            err = 4;
-            break;
-        }
+        for (int i = 0; i < data_shards; i++)
+            rs->m[i*data_shards + i] = 1;
 
         for (int j = 0; j < parity_shards; j++) {
             for (int i = 0; i < data_shards; i++)
@@ -443,21 +485,11 @@ reed_solomon* reed_solomon_new(int data_shards, int parity_shards) {
             break;
         }
 
-        free(vm);
-        free(top);
-        vm = NULL;
-        top = NULL;
         return rs;
 
     } while(0);
 
     fprintf(stderr, "err=%d\n", err);
-    if (NULL != vm)
-        free(vm);
-
-    if (NULL != top)
-        free(top);
-
     if (NULL != rs) {
         if (NULL != rs->m)
             free(rs->m);
