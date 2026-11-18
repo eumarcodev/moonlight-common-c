@@ -167,7 +167,15 @@ int parseRtspMessage(PRTSP_MESSAGE msg, char* rtspMessage, int length) {
 
                 // Check if we're at the end of the message portion marked by \r\n\r\n
                 // endCheck points to the remainder of messageBuffer after the token
-                endCheck = &token[0] + strlen(token) + 1;
+                endCheck = &token[0] + strlen(token);
+
+                // If the token was ended by our own null terminator rather than by a
+                // delimiter, nothing follows it, so there is no end-of-headers marker.
+                // Stepping past the terminator would read outside messageBuffer.
+                if (endCheck >= &messageBuffer[length]) {
+                    break;
+                }
+                endCheck++;
 
                 // See if we've hit the end of the message. The first \r is missing because it's been tokenized
                 if (startsWith(endCheck, "\n") && endCheck[1] == '\0') {
