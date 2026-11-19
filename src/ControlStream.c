@@ -142,6 +142,7 @@ static PPLT_CRYPTO_CONTEXT decryptionCtx;
 #define IDX_SET_CLIPBOARD 13
 #define IDX_FILE_TRANSFER_NONCE_REQUEST 14
 #define IDX_DS_ADAPTIVE_TRIGGERS 15
+#define IDX_SET_FRAME_BUDGET 16
 
 #define CONTROL_STREAM_TIMEOUT_SEC 10
 #define CONTROL_STREAM_LINGER_TIMEOUT_SEC 2
@@ -163,6 +164,7 @@ static const short packetTypesGen3[] = {
     -1,     // Set Clipboard (unused)
     -1,     // File transfer nonce request (unused)
     -1,     // Set Adaptive Triggers (unused)
+    -1,     // Set frame budget (unused)
 };
 static const short packetTypesGen4[] = {
     0x0606, // Request IDR frame
@@ -181,6 +183,7 @@ static const short packetTypesGen4[] = {
     -1,     // Set Clipboard (unused)
     -1,     // File transfer nonce request (unused)
     -1,     // Set Adaptive Triggers (unused)
+    -1,     // Set frame budget (unused)
 };
 static const short packetTypesGen5[] = {
     0x0305, // Start A
@@ -199,6 +202,7 @@ static const short packetTypesGen5[] = {
     -1,     // Set Clipboard (unused)
     -1,     // File transfer nonce request (unused)
     -1,     // Set Adaptive Triggers (unused)
+    -1,     // Set frame budget (unused)
 };
 static const short packetTypesGen7[] = {
     0x0305, // Start A
@@ -217,6 +221,7 @@ static const short packetTypesGen7[] = {
     -1,     // Set Clipboard (unused)
     -1,     // File transfer nonce request (unused)
     -1,     // Set Adaptive Triggers (unused)
+    -1,     // Set frame budget (unused)
 };
 static const short packetTypesGen7Enc[] = {
     0x0302, // Request IDR frame
@@ -235,6 +240,7 @@ static const short packetTypesGen7Enc[] = {
     0x3001, // Set Clipboard (Apollo protocol extension)
     0x3002, // File transfer nonce request (Apollo protocol extension)
     0x5503, // Set Adaptive Triggers (Sunshine protocol extension)
+    0x3003, // Set frame budget (Helios protocol extension)
 };
 
 static const char requestIdrFrameGen3[] = { 0, 0 };
@@ -2061,6 +2067,26 @@ int LiSendExecServerCmd(uint8_t cmdId) {
         ENET_PACKET_FLAG_RELIABLE,
         false
     );
+}
+
+// Helios extension: ask the host to use a new PyroWave frame budget from the next frame
+int LiSendPyroWaveFrameBudget(uint32_t budgetBytes) {
+    uint8_t payload[4];
+
+    if (!IS_SUNSHINE() || packetTypes[IDX_SET_FRAME_BUDGET] < 0) {
+        return -1;
+    }
+
+    payload[0] = (uint8_t)(budgetBytes & 0xFF);
+    payload[1] = (uint8_t)((budgetBytes >> 8) & 0xFF);
+    payload[2] = (uint8_t)((budgetBytes >> 16) & 0xFF);
+    payload[3] = (uint8_t)((budgetBytes >> 24) & 0xFF);
+    return sendMessageAndForget(packetTypes[IDX_SET_FRAME_BUDGET],
+                                sizeof(payload),
+                                payload,
+                                CTRL_CHANNEL_SERVERCTL,
+                                ENET_PACKET_FLAG_RELIABLE,
+                                false);
 }
 
 // Send a server cmd request to the streaming machine

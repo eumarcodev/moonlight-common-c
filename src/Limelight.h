@@ -611,6 +611,11 @@ void LiSetPyroWaveQualityPrefs(int bitrateKbps, int staticBoost);
 // This function sends a request to the server to execute the requested cmd id.
 int LiSendExecServerCmd(uint8_t cmdId);
 
+// Helios extension: ask the host to use a new PyroWave frame budget (bytes per frame) from the next frame.
+// The host clamps it between its minimum and the budget of the session start. Only meaningful for PyroWave streams.
+// Returns -1 when the host does not support the message.
+int LiSendPyroWaveFrameBudget(uint32_t budgetBytes);
+
 // This function sends an empty payload to the server.
 // This method exists here for workaround client side wifi sleeps.
 int LiSendEmptyPayload();
