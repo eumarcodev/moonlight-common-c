@@ -37,7 +37,7 @@ The test scripts write to `/tmp/<name>` (override with `OUT=`). The real check o
 - **IMPORTANT: use only the bundled `enet` submodule.** It has breaking API/ABI changes; linking any other libenet crashes the client on connect. Never edit or bump `enet/` on your own.
 - **IMPORTANT: a control-message or SDP change MUST match Helios** (`src/stream.cpp`, SDP parsing): ship the library PR, then the submodule bumps.
 - Helios does not use this library's depacketizer: a client-only change needs only the Selene bump.
-- Branches: this repo has no `develop`. Branch from `master` (`feat/*`, `fix/*`, `perf/*`), PR to `master`. Never commit directly to `master`.
+- Branches: same gitflow as Helios and Selene. `develop` is the default branch: `feature/*` from `develop`, PR to `develop`; `master` moves only through a PR `develop` → `master` (no release workflows here). Never commit directly to `develop` or `master`: the `master-develop` ruleset rejects direct pushes, force-pushes and deletion of both.
 - Call the protocol additions "Helios extensions" in new code, PRs and issues (the "Apollo protocol extension" comments are legacy).
 - No device-specific logic or constants taken from the bench devices.
 - Performance claims (FEC, depacketizer) need a measured before/after.
@@ -46,7 +46,7 @@ The test scripts write to `/tmp/<name>` (override with `OUT=`). The real check o
 
 - Change only what the task needs; unrelated findings become a new issue in `eumarcodev/Helios-Server` (component label `moonlight-common-c`).
 - No CI runs for this fork: run the matching `tests/*/build.sh` locally before opening the PR.
-- Flow: PR here → merge → separate submodule bump PR in Selene (and in Helios when the host side is affected).
+- Flow: PR here into `develop` → merge → PR `develop` → `master` → separate submodule bump PR in Selene (and in Helios when the host side is affected).
 - Conventional Commits with a scope (`feat(pyrowave):`, `fix(rtsp):`, `perf(fec):`), one commit per logical phase.
 
 ## 5. Out of scope
