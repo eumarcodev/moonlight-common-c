@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 // ---- stubs for the rest of the library ----
-int AppVersionQuad[4] = {7, 1, 431, -1}; // the version Helios reports, it makes IS_SUNSHINE() true
+int AppVersionQuad[4] = {7, 1, 431, -1}; // the version Helios reports, it makes IS_EXTENDED_HOST() true
 STREAM_CONFIGURATION StreamConfig;
 CONNECTION_LISTENER_CALLBACKS ListenerCallbacks;
 DECODER_RENDERER_CALLBACKS VideoCallbacks;

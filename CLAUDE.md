@@ -38,7 +38,7 @@ The test scripts write to `/tmp/<name>` (override with `OUT=`). The real check o
 - **IMPORTANT: a control-message or SDP change MUST match Helios** (`src/stream.cpp`, SDP parsing): ship the library PR, then the submodule bumps.
 - Helios does not use this library's depacketizer: a client-only change needs only the Selene bump.
 - Branches: same gitflow as Helios and Selene. `develop` is the default branch: `feature/*` from `develop`, PR to `develop`; `master` moves only through a PR `develop` → `master` (no release workflows here). Never commit directly to `develop` or `master`: the `master-develop` ruleset rejects direct pushes, force-pushes and deletion of both.
-- Call the protocol additions "Helios extensions" in new code, PRs and issues (the "Apollo protocol extension" comments are legacy).
+- Call the protocol additions "Helios extensions" in new code, PRs and issues.
 - No device-specific logic or constants taken from the bench devices.
 - Performance claims (FEC, depacketizer) need a measured before/after.
 

@@ -233,13 +233,13 @@ static const short packetTypesGen7Enc[] = {
     0x010b, // Rumble data
     0x0109, // Termination (extended)
     0x010e, // HDR mode
-    0x5500, // Rumble triggers (Sunshine protocol extension)
-    0x5501, // Set motion event (Sunshine protocol extension)
-    0x5502, // Set RGB LED (Sunshine protocol extension)
-    0x3000, // Execute Server Command (Apollo protocol extension)
-    0x3001, // Set Clipboard (Apollo protocol extension)
-    0x3002, // File transfer nonce request (Apollo protocol extension)
-    0x5503, // Set Adaptive Triggers (Sunshine protocol extension)
+    0x5500, // Rumble triggers (Helios protocol extension)
+    0x5501, // Set motion event (Helios protocol extension)
+    0x5502, // Set RGB LED (Helios protocol extension)
+    0x3000, // Execute Server Command (Helios protocol extension)
+    0x3001, // Set Clipboard (Helios protocol extension)
+    0x3002, // File transfer nonce request (Helios protocol extension)
+    0x5503, // Set Adaptive Triggers (Helios protocol extension)
     0x3003, // Set frame budget (Helios protocol extension)
 };
 
@@ -457,8 +457,8 @@ void connectionReceivedCompleteFrame(uint32_t frameIndex) {
 }
 
 void connectionSendFrameFecStatus(PSS_FRAME_FEC_STATUS fecStatus) {
-    // This is a Sunshine protocol extension
-    if (!IS_SUNSHINE()) {
+    // This is a Helios protocol extension
+    if (!IS_EXTENDED_HOST()) {
         return;
     }
 
@@ -700,7 +700,7 @@ static bool sendMessageEnet(short ptype, short paylen, const void* payload, uint
     LC_ASSERT(AppVersionQuad[0] >= 5);
 
     // Only send reliable packets to GFE
-    if (!IS_SUNSHINE()) {
+    if (!IS_EXTENDED_HOST()) {
         flags = ENET_PACKET_FLAG_RELIABLE;
     }
 
@@ -766,7 +766,7 @@ static bool sendMessageEnet(short ptype, short paylen, const void* payload, uint
 
     // Always use channel 0 for GFE and if the requested channel exceeds
     // the peer's supported channel count.
-    if (!IS_SUNSHINE() || channelId >= peer->channelCount) {
+    if (!IS_EXTENDED_HOST() || channelId >= peer->channelCount) {
         channelId = 0;
     }
 
@@ -1277,11 +1277,11 @@ static void controlReceiveThreadFunc(void* context) {
                 BbInitializeWrappedBuffer(&bb, (char*)ctlHdr, sizeof(*ctlHdr), packetLength - sizeof(*ctlHdr), BYTE_ORDER_LITTLE);
 
                 BbGet8(&bb, &enableByte);
-                if (IS_SUNSHINE()) {
+                if (IS_EXTENDED_HOST()) {
                     // Zero the metadata buffer to properly handle older servers if we have to add new fields
                     memset(&hdrMetadata, 0, sizeof(hdrMetadata));
 
-                    // Sunshine sends HDR metadata in this message too
+                    // Helios sends HDR metadata in this message too
                     for (int i = 0; i < 3; i++) {
                         BbGet16(&bb, &hdrMetadata.displayPrimaries[i].x);
                         BbGet16(&bb, &hdrMetadata.displayPrimaries[i].y);
@@ -1402,11 +1402,11 @@ static void lossStatsThreadFunc(void* context) {
         BbPut32(&byteBuffer, 0); // Timestamp?
 
         while (!PltIsThreadInterrupted(&lossStatsThread)) {
-            // For Sunshine servers, send the more detailed per-frame FEC messages
-            if (IS_SUNSHINE()) {
+            // For Helios servers, send the more detailed per-frame FEC messages
+            if (IS_EXTENDED_HOST()) {
                 PQUEUED_FRAME_FEC_STATUS queuedFrameStatus;
 
-                // Sunshine should always use ENet for control messages
+                // Helios should always use ENet for control messages
                 LC_ASSERT(peer != NULL);
 
                 while (LbqPollQueueElement(&frameFecStatusQueue, (void**)&queuedFrameStatus) == LBQ_SUCCESS) {
@@ -1451,8 +1451,8 @@ static void lossStatsThreadFunc(void* context) {
     else {
         char* lossStatsPayload;
 
-        // Sunshine should use the newer codepath above
-        LC_ASSERT(!IS_SUNSHINE());
+        // Helios should use the newer codepath above
+        LC_ASSERT(!IS_EXTENDED_HOST());
 
         lossStatsPayload = malloc(payloadLengths[IDX_LOSS_STATS]);
         if (lossStatsPayload == NULL) {
@@ -2048,7 +2048,7 @@ bool LiGetCurrentHostDisplayHdrMode(void) {
 }
 
 bool LiGetHdrMetadata(PSS_HDR_METADATA metadata) {
-    if (!IS_SUNSHINE() || !hdrEnabled) {
+    if (!IS_EXTENDED_HOST() || !hdrEnabled) {
         return false;
     }
 
@@ -2073,7 +2073,7 @@ int LiSendExecServerCmd(uint8_t cmdId) {
 int LiSendPyroWaveFrameBudget(uint32_t budgetBytes) {
     uint8_t payload[4];
 
-    if (!IS_SUNSHINE() || packetTypes[IDX_SET_FRAME_BUDGET] < 0) {
+    if (!IS_EXTENDED_HOST() || packetTypes[IDX_SET_FRAME_BUDGET] < 0) {
         return -1;
     }
 
