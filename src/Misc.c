@@ -160,5 +160,5 @@ uint64_t LiGetMillis(void) {
 }
 
 uint32_t LiGetHostFeatureFlags(void) {
-    return SunshineFeatureFlags;
+    return HostFeatureFlags;
 }
